@@ -32,12 +32,12 @@ __version__ = '0.0.1'
 import sys
 import json
 
-from flask import Flask, request, jsonify, make_response, send_from_directory, render_template, g
+from flask import Flask, request, jsonify, make_response, send_from_directory, render_template
+from wallflower_pico_models import db
 from wallflower_pico_db import WallflowerDB
 
 #import re
 import datetime
-import sqlite3
 
 # Load config
 config = {
@@ -45,7 +45,10 @@ config = {
     'enable_ws': False,
     'http_port': 5000,
     'ws_port': 5050,
-    'database': 'wallflower_db'
+    'database': {
+        'name': 'wallflower_db',
+        'type': 'sqlite'
+    }
 }
 
 try:
@@ -72,12 +75,25 @@ if config['enable_ws']:
 
 app = Flask(__name__)
 
-@app.teardown_appcontext
-def close_connection(exception):
-    db = getattr(g, '_database', None)
-    if db is not None:
-        db.close()
+if config['database']['type'] == 'sqlite':
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///'+config['database']['name']+'.sqlite'    
+elif config['database']['type'] == 'postgresql':
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'postgres://'+config['database']['user']+':'+config['database']['password']+'@'+config['database']['host']+':'+str(config['database']['port'])+'/'+config['database']['database']
+elif config['database']['type'] == 'postgresql-heroku':
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'postgres://'+config['database']['user']+':'+config['database']['password']+'@'+config['database']['host']+':'+str(config['database']['port'])+'/'+config['database']['database']
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
+# Create database connection object
+db.init_app(app)
+pico_db = WallflowerDB()
+pico_db.db = db
+
+# Initialize db with Flask app context   
+# Note: current_app points to app               
+with app.app_context():
+    # Create database and tables
+    #db.drop_all() 
+    db.create_all()
 
 # Routes
 # Route index/dashboard html file
@@ -106,9 +122,6 @@ def send_file(filename):
 # Route Network Requests
 @app.route('/networks/<network_id>', methods=['GET'])
 def networks(network_id):
-    pico_db = WallflowerDB()
-    pico_db.database = config['database']
-
     # Check network id
     if network_id != config['network-id']:
         response = {
@@ -137,9 +150,6 @@ def networks(network_id):
 # Route Object Requests
 @app.route('/networks/'+config['network-id']+'/objects/<object_id>', methods=['GET','PUT','POST','DELETE'])
 def objects(object_id):
-    pico_db = WallflowerDB()
-    pico_db.database = config['database']
-    
     at = datetime.datetime.utcnow().isoformat() + 'Z'
 
     object_request = {
@@ -205,9 +215,6 @@ def objects(object_id):
 # Route Object Requests
 @app.route('/networks/'+config['network-id']+'/objects/<object_id>/streams/<stream_id>', methods=['GET','PUT','POST','DELETE'])
 def streams(object_id,stream_id):
-    pico_db = WallflowerDB()
-    pico_db.database = config['database']
-    
     at = datetime.datetime.utcnow().isoformat() + 'Z'
     
     stream_request = {
@@ -283,9 +290,6 @@ def streams(object_id,stream_id):
 # Route Stream Requests
 @app.route('/networks/'+config['network-id']+'/objects/<object_id>/streams/<stream_id>/points', methods=['GET','POST'])
 def points(object_id,stream_id):
-    pico_db = WallflowerDB()
-    pico_db.database = config['database']
-    
     at = datetime.datetime.utcnow().isoformat() + 'Z'
     
     points_request = {
@@ -414,17 +418,8 @@ if config['enable_ws']:
 
 if __name__ == '__main__':
     # Check if the network exists and create, if necessary
-    at = datetime.datetime.utcnow().isoformat() + 'Z'
-    
     with app.app_context():
-        pico_db = WallflowerDB()
-        pico_db.database = config['database']
-        
-        # Create wcc_networks table, if necessary
-        pico_db.execute( 'CREATE TABLE IF NOT EXISTS wcc_networks (timestamp date, network_id text, network_record text)' )
-        
-        # Check if default network exists
-        exists = pico_db.loadNetworkRecord(config['network-id'])
+        exists, net = pico_db.networkExists((config['network-id'],))
         if not exists:
             # Create the default network
             network_request = {
@@ -433,6 +428,7 @@ if __name__ == '__main__':
                     'network-name': 'Local Wallflower.cc Network'
                 }
             }
+            at = datetime.datetime.utcnow().isoformat() + 'Z'
             pico_db.do(network_request,'create','network',(config['network-id'],),at)
     
     # Add WebSocket

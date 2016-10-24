@@ -1,7 +1,15 @@
 {
 	"network-id": "local",
 	"enable_ws": false,
-	"database": "wallflower_db", 
+	"database": {
+		"name": "wallflower_db", 
+		"type": "postgresql",
+		"host": "ec2-54-235-193-41.compute-1.amazonaws.com",
+		"port": 5432,
+		"database": "d9kfp15k8qhang",
+		"user": "kyiznqplfnehdt",
+		"password": "Xtnx3ziB_UoAutSS8Px9GzcvAg"
+	},
 	"http_port": 5000, 
 	"ws_port": 5050
 }
